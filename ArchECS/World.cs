@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -14,6 +15,8 @@ namespace ArchECS
 {
     public class World : IDisposable
     {
+        internal static World ActiveWorld;
+
         internal Component[] _components = new Component[256];
         Dictionary<Type, int> _componentIndex = new Dictionary<Type, int>();
         Table[] _tables;
@@ -35,6 +38,7 @@ namespace ArchECS
             _tables[0] = new Table(this, new int[0]);
             _tableCount = 1;
             _tableLookup.Add(new Table.TableLookup(), 0);
+            ActiveWorld = this;
         }
 
         public void Reset()
@@ -149,6 +153,34 @@ namespace ArchECS
             return new EntityHandle { Id = CreateEntity(), World = this };
         }
 
+        public unsafe ref Entity CreateEntity<T>(long targetId, T t)
+        {
+            ref var entity = ref AllocateAtEntityId(targetId);
+            Span<byte> newComponentIds = stackalloc byte[1];
+            newComponentIds[0] = (byte)GetComponentID<T>();
+            var (newTable, newTableId) = TableFromKey(new Table.TableLookup(newComponentIds), newComponentIds);
+            entity.TableId = newTableId;
+            entity.TableIndex = (uint)newTable.AddSlot(targetId);
+            entity.World = this;
+            entity.SetComponentInternal(t);
+            return ref entity;
+        }
+
+        public unsafe ref Entity CreateEntity<T1, T2>(long targetId, in T1 t1, in T2 t2)
+        {
+            ref var entity = ref AllocateAtEntityId(targetId);
+            Span<byte> newComponentIds = stackalloc byte[2];
+            newComponentIds[0] = (byte)GetComponentID<T1>();
+            newComponentIds[1] = (byte)GetComponentID<T2>();
+            var (newTable, newTableId) = TableFromKey(new Table.TableLookup(newComponentIds), newComponentIds);
+            entity.TableId = newTableId;
+            entity.TableIndex = (uint)newTable.AddSlot(targetId);
+            entity.World = this;
+            entity.SetComponentInternal(t1);
+            entity.SetComponentInternal(t2);
+            return ref entity;
+        }
+
         public void RegisterComponent<T>()
         {
             if (!_componentIndex.ContainsKey(typeof(T)))
@@ -167,12 +199,12 @@ namespace ArchECS
         const long generationMask = 0x0000000f;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-        unsafe internal ref AllocationId DecomposeIndex(long index)
+        unsafe internal int ExtractIndex(long index)
         {
             unchecked
             {
                 var ptr = (AllocationId* )&index;
-                return ref *ptr;
+                return ptr->index;
             }
         }
 
@@ -182,7 +214,7 @@ namespace ArchECS
             [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
             get
             {
-                ref var result = ref _entities[DecomposeIndex(index).index];
+                ref var result = ref _entities[ExtractIndex(index)];
                 if (result.Id != index)
                     throw new InvalidOperationException();
 
@@ -257,13 +289,13 @@ namespace ArchECS
         internal bool HasComponent<T>(int tableId)
         {
             var table = _tables[tableId];
-            for (int i = 0; i < _components.Length; i++)
+            for (int i = 0; i < table.ComponentTypes.Length; i++)
             {
-                if (_components[i].TargetType == typeof(T))
+                if (table.ComponentTypes[i] == typeof(T))
                 {
                     return true;
                 }
-                else if (_components[i].TargetType == null)
+                else if (table.ComponentTypes[i] == null)
                     break;
             }
             return false;
@@ -290,7 +322,7 @@ namespace ArchECS
         }
 
         [StructLayout(LayoutKind.Explicit, Size = 8)]
-        internal struct AllocationId
+        public struct AllocationId
         {
             [FieldOffset(0)]
             public long full;
@@ -332,14 +364,58 @@ namespace ArchECS
             }
         }
 
+        public static bool InterlockedExchangeIfGreaterThan(ref int location, int comparison, int newValue)
+        {
+            int initialValue;
+            do
+            {
+                initialValue = location;
+                if (initialValue >= comparison) return false;
+            }
+            while (Interlocked.CompareExchange(ref location, newValue, initialValue) != initialValue);
+            return true;
+        }
+
+        private unsafe ref Entity AllocateAtEntityId(long targetId)
+        {
+            unchecked
+            {
+                AllocationId aid = new AllocationId { full = targetId, generation = 1 };
+                int newId = aid.index;
+                InterlockedExchangeIfGreaterThan(ref _currentId, newId, newId);
+                if (_entities.Length <= _currentId)
+                {
+                    //lock (this)
+                    {
+                        if (_entities.Length <= _currentId)
+                        {
+                            var newArray = ArrayPool<Entity>.Shared.Rent((int)newId * 2);
+                            Array.Clear(newArray, _entities.Length, newArray.Length - _entities.Length);
+                            _entities.CopyTo(newArray, 0);
+                            ArrayPool<Entity>.Shared.Return(_entities, true);
+                            _entities = newArray;
+                        }
+                    }
+                }
+
+                ref var targetEntity = ref _entities[newId];
+                if (targetEntity.TableId != 0)
+                {
+                    Trace.WriteLine(string.Format("duplicate id {0}", newId));
+                }
+
+                targetEntity.Id = aid.full;
+
+                return ref targetEntity;
+            }
+        }
+
         public void DestroyEntity(long entityUID)
         {
-            throw new NotImplementedException();
-            //var dsEntityData = UIDsToEntityDatas[entityUID];
-            //ArchetypePool pool = archetypePools_[dsEntityData.ArchetypeFlags];
-            //var replacerUID = pool.Remove(dsEntityData.IndexInPool);
-            //UIDsToEntityDatas[replacerUID] = dsEntityData;
-            //reuseIds.Enqueue(entityUID);
+            ref var target = ref _entities[entityUID];
+            var table = TableFromId(target.TableId);
+            table.Remove((int)target.TableIndex);
+            _reuseIds.Enqueue(entityUID);
         }
 
         public void Dispose()

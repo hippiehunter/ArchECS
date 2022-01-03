@@ -12,7 +12,7 @@ namespace ArchECS
 
     class ComponentRegistry
     {
-        private static int MaxComponentId = 0;
+        private static int MaxComponentId = -1;
         internal class ComponentId<T>
         {
             static ComponentId()

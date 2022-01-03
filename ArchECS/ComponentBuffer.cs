@@ -9,6 +9,7 @@ namespace ArchECS
 {
     public abstract class ComponentBuffer : IDisposable
     {
+        public bool TriggerEvents;
         public abstract object BoxedValue(int index);
         public abstract void AssureRoomFor(int count);
         public abstract void Remove(int index);
@@ -18,6 +19,7 @@ namespace ArchECS
         internal abstract void Clear();
 
         public abstract void Dispose();
+        internal abstract void TriggerRemoval(in Entity entity, uint index);
     }
 
 
@@ -185,6 +187,11 @@ namespace ArchECS
             return new ComponentBufferEnumerator(Buffer(), _table._emptySlots.GetEnumerator());
         }
 
+        public ComponentBufferEnumerator GetEnumerator(uint startIndex, uint endIndex)
+        {
+            return new ComponentBufferEnumerator(Buffer(), _table._emptySlots.GetEnumerator(), startIndex, endIndex);
+        }
+
         internal override void Clear()
         {
             Array.Clear(_data, 0, _data.Length);
@@ -195,10 +202,21 @@ namespace ArchECS
             return this[(uint)index];
         }
 
+        internal override void TriggerRemoval(in Entity entity, uint index)
+        {
+            
+        }
+
+        internal void TriggerSet(in Entity entity, uint index)
+        {
+            
+        }
+
         public ref struct ComponentBufferEnumerator
         {
             Span<T> data;
-            int current;
+            internal uint CurrentIndex;
+            internal uint EndIndex;
             SortedSet<int>.Enumerator emptySlotEnumerator;
             bool hasEmptySlots;
             public ComponentBufferEnumerator(Span<T> data, SortedSet<int>.Enumerator enumerator) : this()
@@ -206,13 +224,25 @@ namespace ArchECS
                 this.data = data;
                 emptySlotEnumerator = enumerator;
                 hasEmptySlots = emptySlotEnumerator.MoveNext();
+                CurrentIndex = 0;
+                EndIndex = (uint)data.Length;
+            }
+
+            public ComponentBufferEnumerator(Span<T> data, SortedSet<int>.Enumerator enumerator, uint startIndex, uint endIndex) : this()
+            {
+                this.data = data;
+                emptySlotEnumerator = enumerator;
+                CurrentIndex = startIndex;
+                hasEmptySlots = emptySlotEnumerator.MoveNext();
+                CurrentIndex = startIndex;
+                EndIndex = endIndex;
             }
 
             public bool MoveNext()
             {
-                while(++current < data.Length)
+                while(++CurrentIndex < EndIndex)
                 {
-                    if (hasEmptySlots && emptySlotEnumerator.Current == current)
+                    if (hasEmptySlots && emptySlotEnumerator.Current == CurrentIndex)
                     {
                         hasEmptySlots = emptySlotEnumerator.MoveNext();
                         continue;
@@ -227,7 +257,7 @@ namespace ArchECS
             {
                 get
                 {
-                    return ref data[current];
+                    return ref data[(int)CurrentIndex];
                 }
             }
         }

@@ -357,6 +357,7 @@ namespace ArchECS
         private int[] _components;
         private Dictionary<int, int> _componentLookup;
         public int Count => _count;
+        public int RealCount => _count - _emptySlots.Count;
         private int _count = 0;
         private long[] _indicesToUIDs = ArrayPool<long>.Shared.Rent(1024);
         internal SortedSet<int> _emptySlots;
@@ -506,7 +507,7 @@ namespace ArchECS
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal long GlobalIDFromIndex(int indexInPool)
+        internal long GlobalIDFromIndex(uint indexInPool)
         {
             return _indicesToUIDs[indexInPool];
         }
