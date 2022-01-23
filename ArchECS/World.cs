@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,7 +22,7 @@ namespace ArchECS
         Dictionary<Type, int> _componentIndex = new Dictionary<Type, int>();
         Table[] _tables;
         int _tableCount = 0;
-        Dictionary<Table.TableLookup, int> _tableLookup = new Dictionary<Table.TableLookup, int>(new Table.TableLookupComparer());
+        Dictionary<Vector256<ulong>, int> _tableLookup = new Dictionary<Vector256<ulong>, int>(new Table.VectorComparer256());
         private Entity[] _entities = ArrayPool<Entity>.Shared.Rent(1024);
         private int _currentId = 0;
         private Queue<long> _reuseIds = new Queue<long>();
@@ -37,7 +38,7 @@ namespace ArchECS
             _tables = ArrayPool<Table>.Shared.Rent(1024);
             _tables[0] = new Table(this, new int[0]);
             _tableCount = 1;
-            _tableLookup.Add(new Table.TableLookup(), 0);
+            _tableLookup.Add(Vector256<ulong>.Zero, 0);
             ActiveWorld = this;
         }
 
@@ -111,7 +112,7 @@ namespace ArchECS
             return result;
         }
 
-        internal (Table newTable, int newTableId) TableFromKey(in Table.TableLookup tableLookup, Span<byte> componentIds)
+        internal (Table newTable, int newTableId) TableFromKey(in Vector256<ulong> tableLookup, Span<byte> componentIds)
         {
             if(_tableLookup.TryGetValue(tableLookup, out var newTableId))
             {
@@ -158,7 +159,7 @@ namespace ArchECS
             ref var entity = ref AllocateAtEntityId(targetId);
             Span<byte> newComponentIds = stackalloc byte[1];
             newComponentIds[0] = (byte)GetComponentID<T>();
-            var (newTable, newTableId) = TableFromKey(new Table.TableLookup(newComponentIds), newComponentIds);
+            var (newTable, newTableId) = TableFromKey(Table.MakeTableLookup(newComponentIds), newComponentIds);
             entity.TableId = newTableId;
             entity.TableIndex = (uint)newTable.AddSlot(targetId);
             entity.World = this;
@@ -172,7 +173,7 @@ namespace ArchECS
             Span<byte> newComponentIds = stackalloc byte[2];
             newComponentIds[0] = (byte)GetComponentID<T1>();
             newComponentIds[1] = (byte)GetComponentID<T2>();
-            var (newTable, newTableId) = TableFromKey(new Table.TableLookup(newComponentIds), newComponentIds);
+            var (newTable, newTableId) = TableFromKey(Table.MakeTableLookup(newComponentIds), newComponentIds);
             entity.TableId = newTableId;
             entity.TableIndex = (uint)newTable.AddSlot(targetId);
             entity.World = this;
@@ -193,7 +194,11 @@ namespace ArchECS
                 _components[i] = Component.MakeComponent<T>(this);
                 _componentIndex.Add(typeof(T), i);
             }
-            
+        }
+
+        public void FinalizeComponents()
+        {
+            _tableLookup = new Dictionary<Vector256<ulong>, int>(_tableLookup, ComponentRegistry.ComponentKeyComparer());
         }
 
         const long generationMask = 0x0000000f;

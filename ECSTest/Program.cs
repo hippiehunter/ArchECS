@@ -49,14 +49,14 @@ struct HasTag
 
 class Program
 {
-    [MethodImpl(MethodImplOptions.NoOptimization)]
+    //[MethodImpl(MethodImplOptions.NoOptimization)]
     static void Benchmark(int entityCount, bool randomComponents)
     {
         Console.WriteLine($"Benchmarking {entityCount} entities, ARCHETYPES, random insertion order: {randomComponents}");
 
+        var startTime = DateTime.Now;
         using (var world = new World())
         {
-
             world.RegisterComponent<Int1>();
             world.RegisterComponent<Int2>();
             world.RegisterComponent<Int3>();
@@ -64,6 +64,7 @@ class Program
             world.RegisterComponent<Int5>();
             world.RegisterComponent<Int6>();
             world.RegisterComponent<HasTag>();
+            world.FinalizeComponents();
 
             using var query1 = new Query(world, new Type[] { typeof(Int1), typeof(Int2) });
             using var query2 = new Query(world, new Type[] { typeof(Int2), typeof(Int3) });
@@ -168,11 +169,13 @@ class Program
                     checkSum ^= (ulong)(int6.x + int6.y);
                 });
 
-                Console.WriteLine($"checksum: {checkSum}");
+                //Console.WriteLine($"checksum: {checkSum}");
                 
             }
 
             ArrayPool<long>.Shared.Return(ids);
+            var endTime = DateTime.Now;
+            Console.WriteLine(endTime - startTime);
         }
 
 
@@ -181,10 +184,13 @@ class Program
 
     static void Main(string[] args)
     {
-        Benchmark(100000, false);
-        state = 42;
-        Benchmark(100000, false);
-        Benchmark(100000, true);
+        for (int i = 0; i < 10; i++)
+        {
+            Benchmark(100000, false);
+            state = 42;
+            Benchmark(100000, false);
+            Benchmark(100000, true);
+        }
         //Console.ReadKey();
         return;
     }

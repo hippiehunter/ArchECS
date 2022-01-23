@@ -392,7 +392,7 @@ namespace ArchECS
 
         private unsafe (Table newTable, int newTableIndex) MoveToNewTable(Table oldTable, int indexInOldPool, int[] oldComponentIds, Span<byte> newComponentIds)
         {
-            var (newTable, newTableId) = World.TableFromKey(new Table.TableLookup(newComponentIds), newComponentIds);
+            var (newTable, newTableId) = World.TableFromKey(Table.MakeTableLookup(newComponentIds), newComponentIds);
             var newTableIndex = newTable.AddSlot(Id);
             oldTable.CopyComponentsTo(indexInOldPool, newTable, newTableIndex);
             TableId = newTableId;

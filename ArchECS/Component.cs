@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +21,16 @@ namespace ArchECS
                 Index = Interlocked.Increment(ref MaxComponentId);
             }
             public static int Index;
+        }
+
+        public static IEqualityComparer<Vector256<ulong>> ComponentKeyComparer()
+        {
+            if (MaxComponentId >= 128)
+                return new Table.VectorComparer256();
+            else if (MaxComponentId >= 64)
+                return new Table.VectorComparer128();
+            else
+                return new Table.VectorComparer64();
         }
     }
 
